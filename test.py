@@ -1,0 +1,20 @@
+from src.create_data.create_data import create_data
+
+alpha, beta, X, Y = create_data(M=5, N=100, r_mean=0.8, r_std=0.1)
+
+print("Alpha:", alpha)
+print("Beta:", beta)
+print("X shape:", X.shape)
+print("Y shape:", Y.shape)
+print("First 5 rows of X:\n", X[:5])
+print("First 5 rows of Y:\n", Y[:5])
+print("X dtype:", X.dtype)
+print("Y dtype:", Y.dtype)
+print("X min:", X.min(), "max:", X.max())
+print("Y min:", Y.min(), "max:", Y.max())
+print("X mean:", X.mean(), "std:", X.std())
+print("Y mean:", Y.mean(), "std:", Y.std())
+print("X first row:", X[0])
+print("Y first row:", Y[0])
+print("X last row:", X[-1])
+print("Y last row:", Y[-1])
