@@ -28,7 +28,7 @@ def build_model(X: NDArray, y: NDArray) -> Tuple[NDArray, List[NDArray]]:
     # Get the intercepts and coefficients from each of the fitted estimators
     # model.estimators_ is a list of fitted LinearRegression models
     intercepts = np.array([estimator.intercept_ for estimator in model.estimators_])
-    coefficients = [estimator.coef_ for estimator in model.estimators_]
+    coefficients = np.array([estimator.coef_ for estimator in model.estimators_])
 
     return intercepts, coefficients
 
