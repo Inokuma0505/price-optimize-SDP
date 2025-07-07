@@ -23,8 +23,14 @@ attrs==23.2.0
     # via aiohttp
 certifi==2022.12.7
     # via requests
+cffi==1.17.1
+    # via clarabel
 charset-normalizer==2.1.1
     # via requests
+clarabel==0.11.1
+    # via cvxpy
+cvxpy==1.6.6
+    # via research-template
 filelock==3.9.0
     # via torch
 frozenlist==1.4.1
@@ -42,8 +48,10 @@ idna==3.4
     # via requests
     # via yarl
 jinja2==3.1.2
+    # via osqp
     # via torch
 joblib==1.4.0
+    # via osqp
     # via research-template
     # via scikit-learn
 lightning==2.2.3
@@ -64,15 +72,21 @@ multidict==6.0.5
 networkx==3.2.1
     # via torch
 numpy==1.26.3
+    # via clarabel
+    # via cvxpy
     # via lightning
+    # via osqp
     # via pandas
     # via pytorch-lightning
     # via research-template
     # via scikit-learn
     # via scipy
+    # via scs
     # via torchmetrics
 omegaconf==2.3.0
     # via hydra-core
+osqp==1.0.4
+    # via cvxpy
 packaging==22.0
     # via hydra-core
     # via lightning
@@ -83,6 +97,8 @@ pandas==2.2.2
     # via research-template
 polars==0.20.21
     # via research-template
+pycparser==2.22
+    # via cffi
 python-dateutil==2.9.0.post0
     # via pandas
 pytorch-lightning==2.2.2
@@ -98,10 +114,18 @@ requests==2.28.1
 scikit-learn==1.4.2
     # via research-template
 scipy==1.13.0
+    # via clarabel
+    # via cvxpy
+    # via osqp
     # via research-template
     # via scikit-learn
+    # via scs
+scs==3.2.7.post2
+    # via cvxpy
+    # via research-template
 setuptools==69.5.1
     # via lightning-utilities
+    # via osqp
 six==1.16.0
     # via python-dateutil
 sympy==1.14.0

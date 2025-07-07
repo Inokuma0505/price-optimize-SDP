@@ -50,15 +50,18 @@ def optimize_price_new(
 
     # ---- 最適化の実行 ----
     m.optimize()
+    
+    # 実行時間の取得
+    m_time = m.Runtime
 
     # ---- 結果の返却 ----
     if m.Status == GRB.OPTIMAL:
         optimal_prices = prices_mvar.X
         max_revenue = m.ObjVal
-        print("--- New Formulation (QCQP) ---")
-        print(f"Optimal Prices: {np.round(optimal_prices, 4)}")
-        print(f"Maximum Revenue: {max_revenue:.4f}")
-        return optimal_prices, max_revenue
+        #print("--- New Formulation (QCQP) ---")
+        #print(f"Optimal Prices: {np.round(optimal_prices, 4)}")
+        #print(f"Maximum Revenue: {max_revenue:.4f}")
+        return optimal_prices, max_revenue, m_time
     else:
         print("Optimization was not successful.")
         return np.array([]), 0.0

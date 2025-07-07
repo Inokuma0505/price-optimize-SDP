@@ -43,10 +43,14 @@ def optimize_price(
     # 4. Solve the optimization problem
     m.optimize()
     
+    # 計算時間を取得
+    solve_time = m.Runtime if m.Runtime else 0.0
+    
+    
     if m.Status == GRB.OPTIMAL:
         optimal_prices = prices.X
         max_revenue = m.ObjVal
-        return optimal_prices, max_revenue
+        return optimal_prices, max_revenue, solve_time
     else:
         print("Optimization was not successful.")
         return np.array([]), 0.0
