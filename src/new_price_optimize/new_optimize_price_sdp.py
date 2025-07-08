@@ -3,15 +3,16 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import List, Tuple
 
-def optimize_price_sdp(
+def optimize_price_sdp_mosek(
     intercepts: NDArray,
     coefficients: List[NDArray],
     p_bar: NDArray,
     epsilon: float,
-) -> Tuple[NDArray | None, float | None]:
+) -> Tuple[NDArray | None, float | None, float | None]:
     """
     QCQP（二次制約付き二次計画）問題のラグランジュ双対問題をSDP（半正定値計画）として定式化し、
     総売上の最大値と最適価格を計算します。このアプローチはS-procedureに基づいています。
+    ソルバーとしてMOSEKを使用します。
 
     Args:
         intercepts (NDArray): 需要予測モデルの切片 (θ_0)
@@ -20,7 +21,7 @@ def optimize_price_sdp(
         epsilon (float): 許容される誤差 (ε)
 
     Returns:
-        Tuple[NDArray | None, float | None]: (最適価格, 最大売上)
+        Tuple[NDArray | None, float | None, float | None]: (最適価格, 最大売上, 計算時間)
     """
     num_products = len(intercepts)
 
@@ -51,8 +52,10 @@ def optimize_price_sdp(
 
     constraints = [LMI >> 0]
     problem = cp.Problem(cp.Maximize(mu_2), constraints)
-    problem.solve(solver=cp.SCS)
     
+    # ---- ソルバーをMOSEKに変更 ----
+    problem.solve(solver=cp.MOSEK)
+
     # 実行時間を取得
     solve_time = problem.solver_stats.solve_time
 
@@ -75,12 +78,41 @@ def optimize_price_sdp(
         # 最大売上
         max_revenue = -problem.value
 
-        print("--- SDP Dual Formulation with Price Recovery ---")
+        print("--- SDP Dual Formulation with Price Recovery (MOSEK) ---")
         print(f"Optimal Prices: {np.round(optimal_prices, 4)}")
         print(f"Maximum Revenue: {max_revenue:.4f}")
+        print(f"Solve Time: {solve_time:.6f} seconds")
+
 
         return optimal_prices, max_revenue, solve_time
     else:
         print("SDP Optimization was not successful.")
         print(f"Problem status: {problem.status}")
-        return None, None
+        return None, None, None
+
+# ---- 以下は使用例です ----
+if __name__ == '__main__':
+    # MOSEKがインストールされているか確認
+    if 'MOSEK' in cp.installed_solvers():
+        print("MOSEK solver is available.\n")
+        
+        # ダミーデータの作成
+        num_products = 5
+        np.random.seed(0)
+        intercepts = np.random.rand(num_products) * 10
+        # 係数行列を負定値に近づけるための処理
+        A = np.random.rand(num_products, num_products)
+        coefficients = - (A.T @ A) 
+        p_bar = np.random.rand(num_products) * 20
+        epsilon = 50.0
+
+        print("--- Input Data ---")
+        print(f"Number of products: {num_products}")
+        print(f"Epsilon: {epsilon}\n")
+
+        # 最適化の実行
+        optimize_price_sdp_mosek(intercepts, coefficients, p_bar, epsilon)
+    else:
+        print("MOSEK solver is not installed or not found by CVXPY.")
+        print("Please install MOSEK and its Python interface.")
+        print("Installation instructions can be found at: https://www.mosek.com/documentation/")

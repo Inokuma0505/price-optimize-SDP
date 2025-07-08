@@ -1,8 +1,9 @@
+import cvxpy as cp
 import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 from numpy.typing import NDArray
-from typing import List
+from typing import List, Tuple
 
 def optimize_price_new(
     intercepts: NDArray,
@@ -64,4 +65,60 @@ def optimize_price_new(
         return optimal_prices, max_revenue, m_time
     else:
         print("Optimization was not successful.")
-        return np.array([]), 0.0
+        return np.array([]), 0.0, 0.0
+    
+
+def optimize_price_new_mosek(
+    intercepts: NDArray,
+    coefficients: NDArray,
+    p_bar: NDArray,
+    epsilon: float,
+) -> Tuple[NDArray | None, float | None, float | None]:
+    """
+    価格の平均値からの距離を制約とするQCQPモデルを用いて、総売上を最大化します。
+    問題をCVXPYで記述し、MOSEKソルバーを使用して解きます。
+    (ValueError: Quadratic form matrices must be symmetric/Hermitian. 対策済み)
+
+    Args:
+        intercepts (NDArray): 需要予測モデルの切片 (θ_0)
+        coefficients (NDArray): 需要予測モデルの係数 (Θ_2)
+        p_bar (NDArray): 平均価格ベクトル (p̄)
+        epsilon (float): 許容される誤差 (ε)
+
+    Returns:
+        Tuple[NDArray | None, float | None, float | None]: (最適価格, 最大売上, 計算時間)
+    """
+    num_products = len(intercepts)
+
+    # ---- CVXPYの変数を定義 ----
+    prices = cp.Variable(num_products, name="p", pos=True)
+
+    # ---- 【修正点】係数行列を対称行列に変換 ----
+    # cvxpy.quad_formは対称行列を要求するため、(Q + Q.T)/2 を計算して対称化します。
+    # この処理を行っても、二次形式の値 (p^T * Q * p) は変わりません。
+    Q_sym = 0.5 * (coefficients + coefficients.T)
+
+    # ---- 目的関数の設定 ----
+    # 対称化された行列 Q_sym を使用します
+    objective = cp.Maximize(cp.quad_form(prices, Q_sym) + intercepts @ prices)
+
+    # ---- 制約条件の設定 ----
+    # 制約: ||p - p̄||^2 <= ε
+    constraints = [cp.sum_squares(prices - p_bar) <= epsilon]
+
+    # ---- 問題の定義と最適化の実行 ----
+    problem = cp.Problem(objective, constraints)
+    problem.solve(solver=cp.MOSEK)
+
+    # 実行時間を取得
+    solve_time = problem.solver_stats.solve_time
+
+    # ---- 結果の返却 ----
+    if problem.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+        optimal_prices = prices.value
+        max_revenue = problem.value
+        return optimal_prices, max_revenue, solve_time
+    else:
+        print("QCQP Optimization with MOSEK was not successful.")
+        print(f"Problem status: {problem.status}")
+        return None, None, None
