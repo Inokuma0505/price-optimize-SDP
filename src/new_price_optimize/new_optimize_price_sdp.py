@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 def optimize_price_sdp_mosek(
     intercepts: NDArray,
-    coefficients: List[NDArray],
+    coefficients: NDArray, # List[NDArray]からNDArrayに変更
     p_bar: NDArray,
     epsilon: float,
 ) -> Tuple[NDArray | None, float | None, float | None]:
@@ -16,7 +16,7 @@ def optimize_price_sdp_mosek(
 
     Args:
         intercepts (NDArray): 需要予測モデルの切片 (θ_0)
-        coefficients (List[NDArray]): 需要予測モデルの係数 (Θ_2)
+        coefficients (NDArray): 需要予測モデルの係数行列 (Θ_0)
         p_bar (NDArray): 平均価格ベクトル (p̄)
         epsilon (float): 許容される誤差 (ε)
 
@@ -30,52 +30,63 @@ def optimize_price_sdp_mosek(
     mu_2 = cp.Variable()
 
     # ---- 行列の構築 ----
-    # 目的関数 g2(p) = -p^T*coeff*p - intercepts^T*p の行列表現 M(g2)
+    # 目的関数 g2(p) = -(p^T*coeff*p + intercepts^T*p) の行列表現 M(g2)
     M_g2 = np.zeros((num_products + 1, num_products + 1))
     M_g2[0, 1:] = -0.5 * intercepts
     M_g2[1:, 0] = -0.5 * intercepts
-    M_g2[1:, 1:] = -coefficients
+    
+
+    # SDPの定式化では、2次形式の行列は対称でなければならない
+    symmetric_coefficients = 0.5 * (coefficients + coefficients.T)
+    M_g2[1:, 1:] = -symmetric_coefficients
+    
+    # (デバッグ用に残す場合はコメントアウトを解除)
+    # print(f"Shape of M_g2: {M_g2}")
 
     # 制約関数 g1(p) の行列表現 M(g1)
     M_g1 = np.zeros((num_products + 1, num_products + 1))
     M_g1[0, 0] = p_bar @ p_bar - epsilon
-    M_g1[0, 1:] = -p_bar.T
+    M_g1[0, 1:] = -p_bar
     M_g1[1:, 0] = -p_bar
     M_g1[1:, 1:] = np.identity(num_products)
+    # print(f"Shape of M_g1: {M_g1}")
 
     # 双対変数 mu_2 の行列表現 M_I
     M_I = np.zeros((num_products + 1, num_products + 1))
     M_I[0, 0] = 1
+    # print(f"Shape of M_I: {M_I}")
 
     # ---- SDPの制約条件（LMI） ----
     LMI = M_g2 + mu_1 * M_g1 - mu_2 * M_I
-
     constraints = [LMI >> 0]
     problem = cp.Problem(cp.Maximize(mu_2), constraints)
     
     # ---- ソルバーをMOSEKに変更 ----
-    problem.solve(solver=cp.MOSEK)
+    try:
+        problem.solve(solver=cp.MOSEK, verbose=False)
+        solve_time = problem.solver_stats.solve_time
+    except cp.error.SolverError:
+        print("Solver MOSEK not found. Please ensure it is installed and licensed.")
+        return None, None, None
 
-    # 実行時間を取得
-    solve_time = problem.solver_stats.solve_time
-
-    if problem.status == cp.OPTIMAL or problem.status == cp.OPTIMAL_INACCURATE:
+    if problem.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
         # ---- 最適価格の復元 ----
-        # 最適点ではLMIは特異になる。その核ベクトルを求める。
-        # LMIの行列を、得られた最適変数 mu_1, mu_2 の値で構築
         LMI_val = M_g2 + mu_1.value * M_g1 - mu_2.value * M_I
 
-        # 最小固有値に対応する固有ベクトルを計算
         eigenvalues, eigenvectors = np.linalg.eigh(LMI_val)
-        # 固有ベクトルは列ベクトルなので、最小固有値に対応する最初の列を取得
         p_homogeneous = eigenvectors[:, 0]
 
-        # 固有ベクトルをスケール調整（均質化されているため）
-        # p_homogeneous = [t, p_1*t, p_2*t, ...]
-        # t = p_homogeneous[0] で割ることで、価格ベクトル p を得る
-        optimal_prices = p_homogeneous[1:] / p_homogeneous[0]
 
-        # 最大売上
+        # 固有ベクトルの符号は任意なので、p_homogeneous[0]が正になるように調整
+        if p_homogeneous[0] < 0:
+            p_homogeneous = -p_homogeneous
+
+        # p_homogeneous[0] (t) がゼロに近い場合はエラーハンドリング
+        if np.isclose(p_homogeneous[0], 0):
+            print("Price recovery failed: homogeneous scaling factor is close to zero.")
+            return None, None, solve_time
+
+        optimal_prices = p_homogeneous[1:] / p_homogeneous[0]
         max_revenue = -problem.value
 
         print("--- SDP Dual Formulation with Price Recovery (MOSEK) ---")
@@ -83,36 +94,8 @@ def optimize_price_sdp_mosek(
         print(f"Maximum Revenue: {max_revenue:.4f}")
         print(f"Solve Time: {solve_time:.6f} seconds")
 
-
         return optimal_prices, max_revenue, solve_time
     else:
         print("SDP Optimization was not successful.")
         print(f"Problem status: {problem.status}")
         return None, None, None
-
-# ---- 以下は使用例です ----
-if __name__ == '__main__':
-    # MOSEKがインストールされているか確認
-    if 'MOSEK' in cp.installed_solvers():
-        print("MOSEK solver is available.\n")
-        
-        # ダミーデータの作成
-        num_products = 5
-        np.random.seed(0)
-        intercepts = np.random.rand(num_products) * 10
-        # 係数行列を負定値に近づけるための処理
-        A = np.random.rand(num_products, num_products)
-        coefficients = - (A.T @ A) 
-        p_bar = np.random.rand(num_products) * 20
-        epsilon = 50.0
-
-        print("--- Input Data ---")
-        print(f"Number of products: {num_products}")
-        print(f"Epsilon: {epsilon}\n")
-
-        # 最適化の実行
-        optimize_price_sdp_mosek(intercepts, coefficients, p_bar, epsilon)
-    else:
-        print("MOSEK solver is not installed or not found by CVXPY.")
-        print("Please install MOSEK and its Python interface.")
-        print("Installation instructions can be found at: https://www.mosek.com/documentation/")

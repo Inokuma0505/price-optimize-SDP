@@ -33,7 +33,7 @@ def beta_star(M: int, M_prime: int) -> NDArray[np.float_]:
         for m_prime in range(M_prime):
             # mとm_primeが同じ場合は[-3M, -2M]の範囲で一様分布から生成
             if m == m_prime:
-                beta_star[m, m_prime] = np.random.uniform(-3 * M, -2 * M)
+                beta_star[m, m_prime] = np.random.uniform(-3 *M, -2 *M)
             # mとm_primeが異なる場合は[0, 3]の範囲で一様分布から生成
             else:
                 beta_star[m, m_prime] = np.random.uniform(0, 3)
