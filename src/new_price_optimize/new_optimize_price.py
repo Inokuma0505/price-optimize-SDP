@@ -1,4 +1,5 @@
 import cvxpy as cp
+from cvxpy.error import DCPError 
 import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
@@ -10,10 +11,11 @@ def optimize_price_new(
     coefficients: List[NDArray],
     p_bar: NDArray,
     epsilon: float,
-) -> tuple[NDArray, float]:
+) -> Tuple[NDArray, float, float]:
     """
     価格の平均値からの距離を制約とする二次制約モデルを用いて、総売上を最大化する価格を計算します。
     PDFの(3)-(4)式を実装したものです。
+    時間切れの場合でも、暫定解があればその結果を返します。
 
     Args:
         intercepts (NDArray): 需要予測モデルの切片 (θ_0)
@@ -22,7 +24,7 @@ def optimize_price_new(
         epsilon (float): 許容される誤差 (ε)
 
     Returns:
-        tuple[NDArray, float]: 最適価格と最大売上
+        Tuple[NDArray, float, float]: 最適価格、最大売上、計算時間
     """
     m = gp.Model("price_optimization_qcqp")
 
@@ -35,19 +37,17 @@ def optimize_price_new(
     objective = prices_mvar @ coefficients @ prices_mvar + intercepts @ prices_mvar
     m.setObjective(objective, GRB.MAXIMIZE)
 
-    # ---- 制約条件の設定（日本語版） ----
-    # MVar で作った 0-d ラッパーから中身を取り出す
-    quad_term_wrap = prices_mvar @ prices_mvar          # MQuadExpr, shape=()
-    lin_term_wrap  = 2 * (p_bar @ prices_mvar)         # MLinExpr, shape=()
-    rhs_val         = float(epsilon - (p_bar @ p_bar))  # Python の float に変換
+    # ---- 制約条件の設定 ----
+    quad_term_wrap = prices_mvar @ prices_mvar
+    lin_term_wrap  = 2 * (p_bar @ prices_mvar)
+    rhs_val        = float(epsilon - (p_bar @ p_bar))
 
-    # .item() で純粋な QuadExpr／LinExpr を取得
     quad_expr = quad_term_wrap.item() - lin_term_wrap.item()
-
-    # そのまま <= 演算子で制約を追加
     m.addQConstr(quad_expr <= rhs_val, name="norm_constraint")
 
-
+    # ---- 実行時間の制限 ----
+    #m.setParam(GRB.Param.OutputFlag, 0) 
+    m.setParam(GRB.Param.TimeLimit, 5) # 1分
 
     # ---- 最適化の実行 ----
     m.optimize()
@@ -56,69 +56,23 @@ def optimize_price_new(
     m_time = m.Runtime
 
     # ---- 結果の返却 ----
-    if m.Status == GRB.OPTIMAL:
+    # 最適解が得られた場合、または時間切れでも実行可能解が見つかっている場合
+    if m.Status == GRB.OPTIMAL or (m.Status == GRB.TIME_LIMIT and m.SolCount > 0):
+        if m.Status == GRB.TIME_LIMIT:
+            print("Warning: Time limit reached. Returning the best solution found so far (suboptimal).")
+        
         optimal_prices = prices_mvar.X
         max_revenue = m.ObjVal
-        #print("--- New Formulation (QCQP) ---")
-        #print(f"Optimal Prices: {np.round(optimal_prices, 4)}")
-        #print(f"Maximum Revenue: {max_revenue:.4f}")
         return optimal_prices, max_revenue, m_time
+    
+    # 時間切れで実行可能解が見つからなかった場合
+    elif m.Status == GRB.TIME_LIMIT:
+        print("Error: Time limit reached, but no feasible solution was found.")
+        return np.array([]), 0.0, m_time
+        
+    # その他の理由で最適化が失敗した場合
     else:
-        print("Optimization was not successful.")
-        return np.array([]), 0.0, 0.0
+        print(f"Optimization was not successful. Status code: {m.Status}")
+        return np.array([]), 0.0, m_time
     
 
-def optimize_price_new_mosek(
-    intercepts: NDArray,
-    coefficients: NDArray,
-    p_bar: NDArray,
-    epsilon: float,
-) -> Tuple[NDArray | None, float | None, float | None]:
-    """
-    価格の平均値からの距離を制約とするQCQPモデルを用いて、総売上を最大化します。
-    問題をCVXPYで記述し、MOSEKソルバーを使用して解きます。
-    (ValueError: Quadratic form matrices must be symmetric/Hermitian. 対策済み)
-
-    Args:
-        intercepts (NDArray): 需要予測モデルの切片 (θ_0)
-        coefficients (NDArray): 需要予測モデルの係数 (Θ_2)
-        p_bar (NDArray): 平均価格ベクトル (p̄)
-        epsilon (float): 許容される誤差 (ε)
-
-    Returns:
-        Tuple[NDArray | None, float | None, float | None]: (最適価格, 最大売上, 計算時間)
-    """
-    num_products = len(intercepts)
-
-    # ---- CVXPYの変数を定義 ----
-    prices = cp.Variable(num_products, name="p", pos=True)
-
-    # ---- 【修正点】係数行列を対称行列に変換 ----
-    # cvxpy.quad_formは対称行列を要求するため、(Q + Q.T)/2 を計算して対称化します。
-    # この処理を行っても、二次形式の値 (p^T * Q * p) は変わりません。
-    Q_sym = 0.5 * (coefficients + coefficients.T)
-
-    # ---- 目的関数の設定 ----
-    # 対称化された行列 Q_sym を使用します
-    objective = cp.Maximize(cp.quad_form(prices, Q_sym) + intercepts @ prices)
-
-    # ---- 制約条件の設定 ----
-    # 制約: ||p - p̄||^2 <= ε
-    constraints = [cp.sum_squares(prices - p_bar) <= epsilon]
-
-    # ---- 問題の定義と最適化の実行 ----
-    problem = cp.Problem(objective, constraints)
-    problem.solve(solver=cp.MOSEK)
-
-    # 実行時間を取得
-    solve_time = problem.solver_stats.solve_time
-
-    # ---- 結果の返却 ----
-    if problem.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-        optimal_prices = prices.value
-        max_revenue = problem.value
-        return optimal_prices, max_revenue, solve_time
-    else:
-        print("QCQP Optimization with MOSEK was not successful.")
-        print(f"Problem status: {problem.status}")
-        return None, None, None

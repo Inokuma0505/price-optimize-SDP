@@ -43,6 +43,9 @@ def optimize_price_new_bdf(
         delta_p = prices_mvar - p_bar
         norm_squared_expr = delta_p @ delta_p
         m.addQConstr(norm_squared_expr.item() <= epsilon, name="norm_constraint")
+        
+        # 実行時間を1分に制限
+        m.setParam(GRB.Param.TimeLimit, 60)
 
         # ---- 最適化の実行 ----
         m.optimize()

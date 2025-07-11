@@ -20,7 +20,7 @@ def calculate_true_revenue(
     """
     # 真のモデルによる需要を計算: d(p*) = α - β p*
     # np.maximum(0, ...) を使い、需要がマイナスにならないようにクリップします。
-    true_demand = np.maximum(0, alpha_true - (beta_true @ optimal_prices))
+    true_demand = np.maximum(0, alpha_true + (beta_true @ optimal_prices))
 
     # 真のモデルによる総売上を計算: R(p*) = (p*)^T * d(p*)
     true_revenue = optimal_prices @ true_demand
